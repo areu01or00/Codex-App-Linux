@@ -3,7 +3,7 @@
 
 Run OpenAI's Codex desktop app on Linux by extracting and patching the macOS version.
 
-
+<img width="1915" height="976" alt="image" src="https://github.com/user-attachments/assets/f55dd00b-f301-436b-86ba-21b6683f361c" />
 
 ```
 ╔═══════════════════════════════════════════════════╗
