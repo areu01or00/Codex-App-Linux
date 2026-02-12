@@ -38,7 +38,7 @@ echo ""
 log "Checking prerequisites..."
 
 # Check for Codex.dmg
-DMG_FILE=$(find "$SCRIPT_DIR" -maxdepth 1 -name "*.dmg" -o -name "Codex.dmg" 2>/dev/null | head -1)
+DMG_FILE=$(find "$SCRIPT_DIR" -maxdepth 1 -type f \( -name "Codex.dmg" -o -name "*.dmg" \) 2>/dev/null | head -1)
 if [ -z "$DMG_FILE" ]; then
     error "Codex.dmg not found. Place it in: $SCRIPT_DIR"
 fi
@@ -98,18 +98,20 @@ success "Extracted DMG, found: $ASAR_PATH"
 # ─────────────────────────────────────────────────────────────
 # Phase 4: Extract ASAR
 # ─────────────────────────────────────────────────────────────
-log "Installing asar tool..."
+log "Checking asar tool..."
+ASAR_CMD=(asar)
 if ! command -v asar &> /dev/null; then
-    npm install -g @electron/asar 2>&1 | tail -3 || {
-        warn "Global install failed, trying local..."
-        npm install @electron/asar 2>&1 | tail -3
-    }
+    warn "Global asar not found, using npx fallback"
+    if ! npx --yes @electron/asar --version > /dev/null 2>&1; then
+        error "asar tool unavailable. Install with: npm install -g @electron/asar"
+    fi
+    ASAR_CMD=(npx --yes @electron/asar)
 fi
 success "asar tool ready"
 
 log "Extracting application source..."
 rm -rf "$SCRIPT_DIR/codex_app_src" 2>/dev/null || true
-if ! asar extract "$ASAR_PATH" "$SCRIPT_DIR/codex_app_src"; then
+if ! "${ASAR_CMD[@]}" extract "$ASAR_PATH" "$SCRIPT_DIR/codex_app_src"; then
     error "Failed to extract app.asar"
 fi
 success "Application source extracted"
@@ -181,8 +183,23 @@ cat > package.json << 'PKGJSON'
 PKGJSON
 
 log "Installing npm dependencies (this takes a few minutes)..."
-if ! npm install 2>&1 | tail -10; then
-    error "npm install failed"
+INSTALL_OK=0
+for ATTEMPT in 1 2 3; do
+    log "npm install attempt ${ATTEMPT}/3"
+    if npm install > /tmp/codex_npm_install.log 2>&1; then
+        INSTALL_OK=1
+        break
+    fi
+
+    tail -10 /tmp/codex_npm_install.log
+    if [ "$ATTEMPT" -lt 3 ]; then
+        warn "npm install failed, retrying in 4s..."
+        sleep 4
+    fi
+done
+
+if [ "$INSTALL_OK" -ne 1 ]; then
+    error "npm install failed after 3 attempts"
 fi
 success "Dependencies installed"
 
@@ -190,8 +207,13 @@ success "Dependencies installed"
 # Phase 7: Rebuild Native Modules
 # ─────────────────────────────────────────────────────────────
 log "Rebuilding native modules for Electron..."
-if ! npx @electron/rebuild 2>&1 | tail -5; then
-    warn "Rebuild had issues, continuing anyway..."
+if ! npx @electron/rebuild > /tmp/codex_rebuild.log 2>&1; then
+    tail -5 /tmp/codex_rebuild.log
+    warn "Rebuild failed once, retrying..."
+    if ! npx @electron/rebuild > /tmp/codex_rebuild.log 2>&1; then
+        tail -5 /tmp/codex_rebuild.log
+        warn "Rebuild had issues, continuing anyway..."
+    fi
 fi
 success "Native modules rebuilt for Linux"
 
