@@ -35,6 +35,21 @@ cd codex-linux
 ./install-codex-linux.sh --skip-cli-install
 ```
 
+## Version Visibility
+
+The installer now records a machine-readable version file at:
+
+`codex-linux/build-info.json`
+
+It includes:
+- Codex app version + build from DMG
+- Electron runtime version
+- main entry file used by Electron
+- DMG path + SHA256 (when `sha256sum` is available)
+- CLI path + CLI version used
+
+You can attach this file when reporting issues.
+
 ## Updating to a New Codex DMG
 
 If OpenAI ships a newer macOS build, you can refresh this Linux port in place:

@@ -124,6 +124,10 @@ resolve_dmg_path() {
 
 DMG_PATH="$(resolve_dmg_path)"
 success "Using DMG: $DMG_PATH"
+DMG_SHA256="unknown"
+if command -v sha256sum >/dev/null 2>&1; then
+  DMG_SHA256="$(sha256sum "$DMG_PATH" | awk '{print $1}')"
+fi
 
 # -----------------------------------------------------------------------------
 # 7zip
@@ -295,6 +299,9 @@ pkg.main = chosen;
 fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
 
+APP_MAIN_ENTRY="$(node -e "const p=require('$OUTPUT_DIR/package.json'); console.log(p.main||'unknown')")"
+ELECTRON_RUNTIME_VERSION="$(node -e "const p=require('$OUTPUT_DIR/package.json'); console.log((p.devDependencies&&p.devDependencies.electron)||'unknown')")"
+
 # -----------------------------------------------------------------------------
 # npm install + rebuild
 # -----------------------------------------------------------------------------
@@ -384,6 +391,32 @@ else
   fi
 fi
 
+CLI_PATH_USED="$OUTPUT_DIR/bin/codex-fallback"
+CLI_VERSION_USED="npx @openai/codex@latest (fallback)"
+if command -v codex >/dev/null 2>&1; then
+  CLI_PATH_USED="$(command -v codex)"
+  CLI_VERSION_USED="$(codex --version 2>/dev/null || echo unknown)"
+fi
+
+node - "$OUTPUT_DIR/build-info.json" \
+  "$APP_VERSION" "$APP_BUILD" "$ELECTRON_RUNTIME_VERSION" "$APP_MAIN_ENTRY" \
+  "$DMG_PATH" "$DMG_SHA256" "$CLI_PATH_USED" "$CLI_VERSION_USED" <<'NODE'
+const fs = require("fs");
+const outPath = process.argv[2];
+const payload = {
+  generatedAt: new Date().toISOString(),
+  codexAppVersion: process.argv[3],
+  codexAppBuild: process.argv[4],
+  electronRuntime: process.argv[5],
+  mainEntry: process.argv[6],
+  dmgPath: process.argv[7],
+  dmgSha256: process.argv[8],
+  cliPath: process.argv[9],
+  cliVersion: process.argv[10],
+};
+fs.writeFileSync(outPath, JSON.stringify(payload, null, 2) + "\n");
+NODE
+
 # -----------------------------------------------------------------------------
 # Desktop shortcut (best effort)
 # -----------------------------------------------------------------------------
@@ -409,7 +442,12 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo "Installed app: $OUTPUT_DIR"
 echo "App version:   $APP_VERSION (build $APP_BUILD)"
+echo "Electron:      $ELECTRON_RUNTIME_VERSION"
+echo "Main entry:    $APP_MAIN_ENTRY"
 echo "DMG source:    $DMG_PATH"
+echo "DMG sha256:    $DMG_SHA256"
+echo "Codex CLI:     $CLI_PATH_USED ($CLI_VERSION_USED)"
+echo "Build info:    $OUTPUT_DIR/build-info.json"
 echo ""
 echo "Launch:"
 echo "  cd \"$OUTPUT_DIR\""
