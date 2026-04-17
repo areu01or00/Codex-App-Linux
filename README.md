@@ -1,33 +1,44 @@
-# Codex for Linux (Unofficial)
+# Codex App Linux (Unofficial)
 
-Run OpenAI's Codex desktop app on Linux by extracting and patching the macOS version.
+<p align="left">
+  <img src="https://img.shields.io/badge/platform-linux-2ea44f" alt="Linux" />
+  <img src="https://img.shields.io/badge/status-active-1f6feb" alt="Status" />
+  <img src="https://img.shields.io/badge/installer-one--click-orange" alt="One click installer" />
+  <img src="https://img.shields.io/badge/runtime-electron-black" alt="Electron" />
+  <img src="https://img.shields.io/badge/project-unofficial-red" alt="Unofficial" />
+</p>
 
-```
-╔═══════════════════════════════════════════════════╗
-║       Codex Linux Installer (Unofficial)          ║
-╚═══════════════════════════════════════════════════╝
-```
+Run the official Codex desktop app on Linux by converting the macOS `.dmg` into a Linux-compatible Electron bundle.
 
-## Quick Start
+## Why this exists
 
-1. Download `install-codex-linux.sh` from this repo
-2. Run:
+OpenAI ships Codex desktop for macOS. The core app is Electron-based, so with extraction + native module rebuilds, it can run on Linux.
+
+## Quick start
+
+### Option A: one command
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/areu01or00/Codex-App-Linux/main/install-codex-linux.sh | bash
+```
+
+### Option B: clone and run
+
+```bash
+git clone https://github.com/areu01or00/Codex-App-Linux.git
+cd Codex-App-Linux
 chmod +x install-codex-linux.sh
 ./install-codex-linux.sh
 ```
 
-The installer will automatically download the latest official Codex DMG if no local `.dmg` is found.
-
-3. Launch:
+Then launch:
 
 ```bash
 cd codex-linux
 ./codex-linux.sh
 ```
 
-## Installer Options
+## Installer flags
 
 ```bash
 ./install-codex-linux.sh --dmg /path/to/Codex.dmg
@@ -35,90 +46,56 @@ cd codex-linux
 ./install-codex-linux.sh --skip-cli-install
 ```
 
-## Version Visibility
+## What the installer does
 
-The installer now records a machine-readable version file at:
+1. Uses a local DMG if available, otherwise downloads latest from OpenAI CDN.
+2. Extracts `app.asar` from the app bundle.
+3. Builds Linux runtime metadata from extracted app version/dependencies.
+4. Installs Electron + dependencies and rebuilds native modules for Linux.
+5. Stubs macOS-only modules (`sparkle`, `electron-liquid-glass`).
+6. Generates launcher script and desktop entry.
+
+## Version diagnostics
+
+After install, the script writes:
 
 `codex-linux/build-info.json`
 
-It includes:
-- Codex app version + build from DMG
+This includes:
+- Codex app version/build from the DMG
 - Electron runtime version
-- main entry file used by Electron
-- DMG path + SHA256 (when `sha256sum` is available)
-- CLI path + CLI version used
+- selected main entrypoint
+- DMG path + SHA256
+- Codex CLI path + version
 
-You can attach this file when reporting issues.
-
-## Updating to a New Codex DMG
-
-If OpenAI ships a newer macOS build, you can refresh this Linux port in place:
-
-```bash
-cd codex-linux-port
-./refresh-from-dmg.sh ../Codex.dmg
-npm install
-npx @electron/rebuild
-./codex-linux.sh
-```
-
-`refresh-from-dmg.sh` will:
-- extract the new DMG
-- replace `.vite`, `webview`, and `native` with fresh app payload
-- stub macOS-only modules
-- update local `package.json` version/electron pin from the extracted app metadata
+Attach this file in issues. It makes compatibility debugging much faster.
 
 ## Requirements
 
-- Linux (tested on Ubuntu 22.04+, should work on most distros)
-- Node.js 18+ and npm
-- ~500MB disk space
-
-## What This Does
-
-The installer:
-
-1. Resolves a DMG source (local file or latest official download URL)
-2. Extracts app payload from `app.asar`
-3. Builds `package.json` from extracted app metadata (version, electron, deps)
-4. Installs/rebuilds native modules for Linux
-5. Stubs macOS-only modules (`electron-liquid-glass`, `sparkle`)
-6. Creates a launcher that prefers your current `codex` CLI in `PATH`
-7. Adds a desktop entry (`~/.local/share/applications/codex-linux.desktop`)
-
-## How It Works
-
-OpenAI's Codex app is built with Electron - a cross-platform framework that bundles Chromium and Node.js. While they only ship a macOS build, the core application is JavaScript/TypeScript that can run on any platform.
-
-The main challenges for Linux:
-- **Native modules** compiled for macOS (Mach-O binaries) need rebuilding for Linux (ELF binaries)
-- **macOS-specific features** like the Sparkle auto-updater and liquid glass visual effects need to be stubbed
-
-See [PORTING-GUIDE.md](PORTING-GUIDE.md) for the full technical breakdown.
+- Linux (tested on Ubuntu 22.04+)
+- Node.js + npm
+- `curl`
+- ~500MB free disk
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| Blank window | Verify `webview/index.html` exists |
-| "CLI not found" | Run `npm install -g @openai/codex` |
-| Auth issues | Run `codex auth` in terminal first |
-| Sandbox errors | Script already uses `--no-sandbox` |
+| Problem | Fix |
+|---|---|
+| `Cannot find module ...` on startup | Re-run installer so dependencies are regenerated for that DMG build |
+| `codex-app-server-version-unsupported` | Update CLI: `npm i -g @openai/codex@latest`; launcher should use `which codex` |
+| CLI not found | Install CLI globally or let launcher use built-in `npx` fallback |
+| Blank/failed window | Ensure `.vite` and `webview` exist under install output directory |
 
-## Files
+## Repo files
 
-```
-├── install-codex-linux.sh   # One-click installer
-├── PORTING-GUIDE.md         # Technical deep-dive
-└── README.md                # You are here
-```
+- `install-codex-linux.sh`: one-click installer
+- `Reverse-engineering-guide.md`: technical breakdown of the original approach
+- `README.md`: usage and troubleshooting
 
 ## Legal
 
-This project provides **instructions only** - no OpenAI code is distributed. Users must obtain `Codex.dmg` directly from OpenAI.
+This project distributes tooling/instructions only. It does not distribute OpenAI app binaries.
 
-For personal and educational use. Not affiliated with OpenAI.
+You must obtain `Codex.dmg` from official OpenAI sources.
 
-## Credits
-
-Reverse engineered with curiosity and caffeine.
+Not affiliated with OpenAI.
