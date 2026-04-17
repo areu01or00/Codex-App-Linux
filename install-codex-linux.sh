@@ -1,212 +1,326 @@
 #!/bin/bash
 #
-# Codex Linux Installer
-# Automatically ports OpenAI Codex macOS app to Linux
+# Codex Linux Installer (Unofficial)
+# Builds a Linux runnable Codex desktop app from the official macOS DMG.
 #
-# Usage: Place Codex.dmg in the same folder as this script, then run:
+# Usage:
 #   chmod +x install-codex-linux.sh
 #   ./install-codex-linux.sh
+#   ./install-codex-linux.sh --dmg /path/to/Codex.dmg
+#   ./install-codex-linux.sh --output /path/to/codex-linux
 #
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+DEFAULT_DMG_URL="https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
+DEFAULT_OUTPUT_DIR="$SCRIPT_DIR/codex-linux"
+WORK_DIR="$(mktemp -d /tmp/codex-linux-install-XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+DMG_PATH=""
+OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
+SKIP_CLI_INSTALL="0"
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log() { echo -e "${CYAN}[*]${NC} $1"; }
 success() { echo -e "${GREEN}[✓]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
+usage() {
+  cat <<USAGE
+Codex Linux Installer (Unofficial)
+
+Options:
+  --dmg <path>       Use an existing Codex DMG
+  --output <path>    Install output directory (default: $DEFAULT_OUTPUT_DIR)
+  --skip-cli-install Do not attempt global Codex CLI install/update
+  -h, --help         Show this help
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dmg)
+      DMG_PATH="${2:-}"
+      [ -n "$DMG_PATH" ] || error "--dmg requires a path"
+      shift 2
+      ;;
+    --output)
+      OUTPUT_DIR="${2:-}"
+      [ -n "$OUTPUT_DIR" ] || error "--output requires a path"
+      shift 2
+      ;;
+    --skip-cli-install)
+      SKIP_CLI_INSTALL="1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      error "Unknown option: $1"
+      ;;
+  esac
+done
+
 echo ""
 echo -e "${CYAN}╔═══════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║       Codex Linux Installer (Unofficial)          ║${NC}"
-echo -e "${CYAN}║   Ports macOS Codex.dmg to run on Linux           ║${NC}"
+echo -e "${CYAN}║    Frictionless DMG -> Linux app conversion       ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ─────────────────────────────────────────────────────────────
-# Phase 1: Prerequisites
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Prereqs
+# -----------------------------------------------------------------------------
 log "Checking prerequisites..."
 
-# Check for Codex.dmg
-DMG_FILE=$(find "$SCRIPT_DIR" -maxdepth 1 -name "*.dmg" -o -name "Codex.dmg" 2>/dev/null | head -1)
-if [ -z "$DMG_FILE" ]; then
-    error "Codex.dmg not found. Place it in: $SCRIPT_DIR"
-fi
-success "Found: $DMG_FILE"
+command -v node >/dev/null 2>&1 || error "Node.js is required (v18+ recommended)."
+command -v npm >/dev/null 2>&1 || error "npm is required."
+command -v curl >/dev/null 2>&1 || error "curl is required."
 
-# Check Node.js
-if ! command -v node &> /dev/null; then
-    error "Node.js not found. Install it first: https://nodejs.org"
-fi
 success "Node.js: $(node --version)"
-
-# Check npm
-if ! command -v npm &> /dev/null; then
-    error "npm not found. Install Node.js properly."
-fi
 success "npm: $(npm --version)"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 2: Get 7zip
-# ─────────────────────────────────────────────────────────────
-log "Setting up extraction tools..."
+# -----------------------------------------------------------------------------
+# Resolve DMG
+# -----------------------------------------------------------------------------
+resolve_dmg_path() {
+  if [ -n "$DMG_PATH" ]; then
+    [ -f "$DMG_PATH" ] || error "DMG not found: $DMG_PATH"
+    echo "$DMG_PATH"
+    return
+  fi
 
-if command -v 7z &> /dev/null; then
-    SEVEN_ZIP="7z"
-elif command -v 7zz &> /dev/null; then
-    SEVEN_ZIP="7zz"
-elif [ -f "/tmp/7zz" ]; then
-    SEVEN_ZIP="/tmp/7zz"
-else
-    log "Downloading portable 7zip..."
-    curl -sL https://www.7-zip.org/a/7z2408-linux-x64.tar.xz -o /tmp/7z.tar.xz
-    tar -xf /tmp/7z.tar.xz -C /tmp/
-    SEVEN_ZIP="/tmp/7zz"
-fi
+  local candidates=(
+    "$SCRIPT_DIR/Codex-latest.dmg"
+    "$SCRIPT_DIR/Codex.dmg"
+    "$SCRIPT_DIR"/*.dmg
+  )
+
+  for c in "${candidates[@]}"; do
+    if [ -f "$c" ]; then
+      echo "$c"
+      return
+    fi
+  done
+
+  local downloaded="$SCRIPT_DIR/Codex-latest.dmg"
+  log "No local DMG found. Downloading latest Codex DMG..."
+  curl -fL --retry 3 --connect-timeout 20 -o "$downloaded" "$DEFAULT_DMG_URL" || error "Failed to download DMG from $DEFAULT_DMG_URL"
+  echo "$downloaded"
+}
+
+DMG_PATH="$(resolve_dmg_path)"
+success "Using DMG: $DMG_PATH"
+
+# -----------------------------------------------------------------------------
+# 7zip
+# -----------------------------------------------------------------------------
+find_7zip() {
+  if command -v 7z >/dev/null 2>&1; then
+    echo "7z"
+    return
+  fi
+  if command -v 7zz >/dev/null 2>&1; then
+    echo "7zz"
+    return
+  fi
+  if [ -x /tmp/7zz ]; then
+    echo "/tmp/7zz"
+    return
+  fi
+
+  log "7z not found. Downloading portable 7zip..."
+  curl -fsSL https://www.7-zip.org/a/7z2408-linux-x64.tar.xz -o /tmp/7z.tar.xz || error "Failed to download 7zip"
+  tar -xf /tmp/7z.tar.xz -C /tmp/ || error "Failed to extract 7zip"
+  [ -x /tmp/7zz ] || error "7zip binary not found after extraction"
+  echo "/tmp/7zz"
+}
+
+SEVEN_ZIP="$(find_7zip)"
 success "7zip ready: $SEVEN_ZIP"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 3: Extract DMG
-# ─────────────────────────────────────────────────────────────
-log "Extracting DMG (this may take a moment)..."
+# -----------------------------------------------------------------------------
+# Extract DMG + ASAR
+# -----------------------------------------------------------------------------
+log "Extracting DMG..."
+"$SEVEN_ZIP" x "$DMG_PATH" -o"$WORK_DIR/extracted" -y >"$WORK_DIR/7z.log" 2>&1 || true
 
-rm -rf "$SCRIPT_DIR/codex_extracted" 2>/dev/null || true
+ASAR_PATH="$(find "$WORK_DIR/extracted" -name app.asar -type f 2>/dev/null | head -1)"
+APP_PLIST="$(find "$WORK_DIR/extracted" -path '*/Codex.app/Contents/Info.plist' -type f 2>/dev/null | head -1)"
 
-# Extract - ignore symlink errors (e.g., /Applications symlink in DMG)
-$SEVEN_ZIP x "$DMG_FILE" -o"$SCRIPT_DIR/codex_extracted" -y > /tmp/7z_output.log 2>&1 || true
+[ -n "$ASAR_PATH" ] || error "app.asar not found in DMG extraction"
+[ -n "$APP_PLIST" ] || error "Codex app Info.plist not found in DMG extraction"
 
-# Find app.asar - it's nested in the .app bundle
-ASAR_PATH=$(find "$SCRIPT_DIR/codex_extracted" -name "app.asar" -type f 2>/dev/null | head -1)
+success "Found app payload"
 
-if [ -z "$ASAR_PATH" ]; then
-    log "Contents of extracted folder:"
-    find "$SCRIPT_DIR/codex_extracted" -maxdepth 4 -type d 2>/dev/null | head -20
-    error "app.asar not found. Is this a valid Codex DMG?"
-fi
-success "Extracted DMG, found: $ASAR_PATH"
+run_asar_extract() {
+  local src="$1"
+  local dst="$2"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 4: Extract ASAR
-# ─────────────────────────────────────────────────────────────
-log "Installing asar tool..."
-if ! command -v asar &> /dev/null; then
-    npm install -g @electron/asar 2>&1 | tail -3 || {
-        warn "Global install failed, trying local..."
-        npm install @electron/asar 2>&1 | tail -3
-    }
-fi
-success "asar tool ready"
+  if command -v asar >/dev/null 2>&1; then
+    asar extract "$src" "$dst"
+    return
+  fi
 
-log "Extracting application source..."
-rm -rf "$SCRIPT_DIR/codex_app_src" 2>/dev/null || true
-if ! asar extract "$ASAR_PATH" "$SCRIPT_DIR/codex_app_src"; then
-    error "Failed to extract app.asar"
-fi
-success "Application source extracted"
+  # No global asar: use npm exec to avoid permanent global state
+  npm exec --yes @electron/asar -- extract "$src" "$dst"
+}
 
-# ─────────────────────────────────────────────────────────────
-# Phase 5: Setup Linux Project
-# ─────────────────────────────────────────────────────────────
-log "Setting up Linux project structure..."
+log "Extracting app.asar..."
+run_asar_extract "$ASAR_PATH" "$WORK_DIR/app_src" || error "Failed to extract app.asar"
 
-PROJECT_DIR="$SCRIPT_DIR/codex-linux"
-rm -rf "$PROJECT_DIR" 2>/dev/null || true
-mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
+[ -d "$WORK_DIR/app_src/.vite" ] || error "Extracted app is missing .vite"
+[ -d "$WORK_DIR/app_src/webview" ] || error "Extracted app is missing webview"
+[ -f "$WORK_DIR/app_src/package.json" ] || error "Extracted app is missing package.json"
 
-# Copy source files
-if [ ! -d "$SCRIPT_DIR/codex_app_src/.vite" ]; then
-    error ".vite folder not found in extracted source"
-fi
-cp -r "$SCRIPT_DIR/codex_app_src/.vite" ./
+# -----------------------------------------------------------------------------
+# Build metadata + package.json synthesis
+# -----------------------------------------------------------------------------
+log "Synthesizing Linux package metadata..."
 
-if [ -d "$SCRIPT_DIR/codex_app_src/webview" ]; then
-    cp -r "$SCRIPT_DIR/codex_app_src/webview" ./
-else
-    warn "webview not at root, searching..."
-    WEBVIEW_PATH=$(find "$SCRIPT_DIR/codex_app_src" -type d -name "webview" 2>/dev/null | head -1)
-    if [ -n "$WEBVIEW_PATH" ]; then
-        cp -r "$WEBVIEW_PATH" ./
-    else
-        error "webview folder not found"
-    fi
-fi
+APP_VERSION="$(awk '/CFBundleShortVersionString/{getline; gsub(/.*<string>|<\/string>.*/,""); print; exit}' "$APP_PLIST")"
+APP_BUILD="$(awk '/CFBundleVersion/{getline; gsub(/.*<string>|<\/string>.*/,""); print; exit}' "$APP_PLIST")"
+[ -n "$APP_VERSION" ] || APP_VERSION="unknown"
+[ -n "$APP_BUILD" ] || APP_BUILD="unknown"
 
-cp -r "$SCRIPT_DIR/codex_app_src/native" ./ 2>/dev/null || mkdir -p native
+node - "$WORK_DIR/app_src/package.json" "$WORK_DIR/package.generated.json" "$APP_VERSION" <<'NODE'
+const fs = require("fs");
+const srcPkg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const outPath = process.argv[3];
+const appVersion = process.argv[4];
 
-success "Source files copied"
+const sourceDeps = srcPkg.dependencies || {};
+const excludedWorkspaceDeps = new Set([
+  "app-server-types",
+  "browser-common",
+  "protocol",
+  "shared-node",
+]);
+const excludedPlatformDeps = new Set([
+  "electron-liquid-glass",
+]);
 
-# ─────────────────────────────────────────────────────────────
-# Phase 6: Install Dependencies
-# ─────────────────────────────────────────────────────────────
-log "Creating package.json..."
+const deps = {};
+for (const [name, version] of Object.entries(sourceDeps)) {
+  if (excludedWorkspaceDeps.has(name)) continue;
+  if (excludedPlatformDeps.has(name)) continue;
+  deps[name] = version;
+}
 
-cat > package.json << 'PKGJSON'
-{
-  "name": "codex-linux",
-  "productName": "Codex",
-  "version": "1.0.0-linux",
-  "main": ".vite/build/main.js",
-  "scripts": {
-    "start": "electron .",
+const electronVersion =
+  (srcPkg.devDependencies && srcPkg.devDependencies.electron) ||
+  (srcPkg.dependencies && srcPkg.dependencies.electron) ||
+  "40.0.0";
+
+const output = {
+  name: "codex-linux",
+  productName: "Codex",
+  version: `${appVersion}-linux`,
+  description: "Codex for Linux (unofficial port)",
+  main: srcPkg.main || ".vite/build/bootstrap.js",
+  scripts: {
+    start: "electron .",
     "start:debug": "electron . --enable-logging"
   },
-  "dependencies": {
-    "better-sqlite3": "^12.4.6",
-    "node-pty": "^1.1.0",
-    "immer": "^10.1.1",
-    "lodash": "^4.17.21",
-    "memoizee": "^0.4.15",
-    "mime-types": "^2.1.35",
-    "shell-env": "^4.0.1",
-    "shlex": "^3.0.0",
-    "smol-toml": "^1.5.2",
-    "zod": "^3.22.0"
-  },
-  "devDependencies": {
-    "electron": "40.0.0",
-    "@electron/rebuild": "^3.6.0"
+  dependencies: deps,
+  devDependencies: {
+    electron: electronVersion,
+    "@electron/rebuild": "^4.0.3"
+  }
+};
+
+fs.writeFileSync(outPath, `${JSON.stringify(output, null, 2)}\n`);
+NODE
+
+# -----------------------------------------------------------------------------
+# Install tree
+# -----------------------------------------------------------------------------
+log "Preparing output directory: $OUTPUT_DIR"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+cp -r "$WORK_DIR/app_src/.vite" "$OUTPUT_DIR/"
+cp -r "$WORK_DIR/app_src/webview" "$OUTPUT_DIR/"
+if [ -d "$WORK_DIR/app_src/native" ]; then
+  cp -r "$WORK_DIR/app_src/native" "$OUTPUT_DIR/"
+else
+  mkdir -p "$OUTPUT_DIR/native"
+fi
+cp "$WORK_DIR/package.generated.json" "$OUTPUT_DIR/package.json"
+
+# Ensure main points to an existing file for newer hashed bundles.
+node - "$OUTPUT_DIR/package.json" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const pkgPath = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+const root = path.dirname(pkgPath);
+const buildDir = path.join(root, ".vite", "build");
+
+const candidates = [
+  pkg.main,
+  ".vite/build/bootstrap.js",
+  ".vite/build/main.js",
+];
+
+let chosen = null;
+for (const c of candidates) {
+  if (!c) continue;
+  if (fs.existsSync(path.join(root, c))) {
+    chosen = c;
+    break;
   }
 }
-PKGJSON
 
-log "Installing npm dependencies (this takes a few minutes)..."
-if ! npm install 2>&1 | tail -10; then
-    error "npm install failed"
-fi
+if (!chosen && fs.existsSync(buildDir)) {
+  const hashedMain = fs.readdirSync(buildDir).find((n) => /^main-.*\.js$/.test(n));
+  if (hashedMain) chosen = `.vite/build/${hashedMain}`;
+}
+
+if (!chosen) chosen = ".vite/build/bootstrap.js";
+pkg.main = chosen;
+fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+
+# -----------------------------------------------------------------------------
+# npm install + rebuild
+# -----------------------------------------------------------------------------
+log "Installing npm dependencies (this can take a few minutes)..."
+(
+  cd "$OUTPUT_DIR"
+  npm install
+)
 success "Dependencies installed"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 7: Rebuild Native Modules
-# ─────────────────────────────────────────────────────────────
 log "Rebuilding native modules for Electron..."
-if ! npx @electron/rebuild 2>&1 | tail -5; then
-    warn "Rebuild had issues, continuing anyway..."
-fi
-success "Native modules rebuilt for Linux"
+(
+  cd "$OUTPUT_DIR"
+  npx @electron/rebuild
+)
+success "Native modules rebuilt"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 8: Stub macOS-only Modules
-# ─────────────────────────────────────────────────────────────
-log "Patching macOS-only modules..."
+# -----------------------------------------------------------------------------
+# Linux stubs / launcher
+# -----------------------------------------------------------------------------
+log "Applying Linux compatibility patches..."
 
-# Remove sparkle.node
-rm -f native/sparkle.node 2>/dev/null || true
+rm -f "$OUTPUT_DIR/native/sparkle.node" 2>/dev/null || true
 
-# Create electron-liquid-glass stub
-mkdir -p node_modules/electron-liquid-glass
-
-cat > node_modules/electron-liquid-glass/index.js << 'STUBJS'
+mkdir -p "$OUTPUT_DIR/node_modules/electron-liquid-glass"
+cat > "$OUTPUT_DIR/node_modules/electron-liquid-glass/index.js" <<'STUBJS'
 const stub = {
   isGlassSupported: () => false,
   enable: () => {},
@@ -217,64 +331,89 @@ module.exports = stub;
 module.exports.default = stub;
 STUBJS
 
-cat > node_modules/electron-liquid-glass/package.json << 'STUBPKG'
+cat > "$OUTPUT_DIR/node_modules/electron-liquid-glass/package.json" <<'STUBPKG'
 {"name":"electron-liquid-glass","version":"1.0.0","main":"index.js"}
 STUBPKG
 
-success "macOS modules stubbed"
-
-# ─────────────────────────────────────────────────────────────
-# Phase 9: Create Launcher
-# ─────────────────────────────────────────────────────────────
-log "Creating launcher script..."
-
-cat > codex-linux.sh << 'LAUNCHER'
+mkdir -p "$OUTPUT_DIR/bin"
+cat > "$OUTPUT_DIR/bin/codex-fallback" <<'CLIWRAP'
 #!/bin/bash
+set -euo pipefail
+exec npx --yes @openai/codex@latest "$@"
+CLIWRAP
+chmod +x "$OUTPUT_DIR/bin/codex-fallback"
+
+cat > "$OUTPUT_DIR/codex-linux.sh" <<'LAUNCHER'
+#!/bin/bash
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 export ELECTRON_RENDERER_URL="file://${SCRIPT_DIR}/webview/index.html"
-export CODEX_CLI_PATH="${CODEX_CLI_PATH:-$(which codex 2>/dev/null || echo /usr/local/bin/codex)}"
+
+if [ -z "${CODEX_CLI_PATH:-}" ]; then
+  if command -v codex >/dev/null 2>&1; then
+    export CODEX_CLI_PATH="$(command -v codex)"
+  else
+    export CODEX_CLI_PATH="${SCRIPT_DIR}/bin/codex-fallback"
+  fi
+fi
 
 exec ./node_modules/.bin/electron . --no-sandbox "$@"
 LAUNCHER
+chmod +x "$OUTPUT_DIR/codex-linux.sh"
 
-chmod +x codex-linux.sh
 success "Launcher created"
 
-# ─────────────────────────────────────────────────────────────
-# Phase 10: Check for Codex CLI
-# ─────────────────────────────────────────────────────────────
-if ! command -v codex &> /dev/null; then
-    warn "Codex CLI not found. Installing..."
-    npm install -g @openai/codex > /dev/null 2>&1 || {
-        warn "Could not install Codex CLI globally. You may need to run:"
-        echo "    npm install -g @openai/codex"
-    }
+# -----------------------------------------------------------------------------
+# Optional CLI install/update
+# -----------------------------------------------------------------------------
+if [ "$SKIP_CLI_INSTALL" = "1" ]; then
+  warn "Skipping Codex CLI install/update by request (--skip-cli-install)."
 else
-    success "Codex CLI found: $(which codex)"
+  log "Ensuring Codex CLI is available..."
+  if command -v codex >/dev/null 2>&1; then
+    success "Codex CLI found: $(command -v codex) ($(codex --version 2>/dev/null || echo unknown))"
+  else
+    warn "Codex CLI not found in PATH. Attempting global install..."
+    if npm install -g @openai/codex@latest >/dev/null 2>&1; then
+      success "Installed Codex CLI globally: $(command -v codex)"
+    else
+      warn "Global install failed (likely permissions). Launcher will use local npx fallback."
+    fi
+  fi
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Cleanup
-# ─────────────────────────────────────────────────────────────
-log "Cleaning up temporary files..."
-rm -rf "$SCRIPT_DIR/codex_extracted" 2>/dev/null || true
-rm -rf "$SCRIPT_DIR/codex_app_src" 2>/dev/null || true
-success "Cleanup complete"
+# -----------------------------------------------------------------------------
+# Desktop shortcut (best effort)
+# -----------------------------------------------------------------------------
+DESKTOP_FILE="$HOME/.local/share/applications/codex-linux.desktop"
+mkdir -p "$(dirname "$DESKTOP_FILE")"
+cat > "$DESKTOP_FILE" <<DESKTOP
+[Desktop Entry]
+Name=Codex (Linux Port)
+Comment=Run Codex desktop app on Linux (unofficial)
+Exec=$OUTPUT_DIR/codex-linux.sh
+Terminal=false
+Type=Application
+Categories=Development;
+DESKTOP
 
-# ─────────────────────────────────────────────────────────────
-# Done!
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Done
+# -----------------------------------------------------------------------------
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║            Installation Complete!                 ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${CYAN}To launch Codex:${NC}"
+echo "Installed app: $OUTPUT_DIR"
+echo "App version:   $APP_VERSION (build $APP_BUILD)"
+echo "DMG source:    $DMG_PATH"
 echo ""
-echo "    cd $PROJECT_DIR"
-echo "    ./codex-linux.sh"
+echo "Launch:"
+echo "  cd \"$OUTPUT_DIR\""
+echo "  ./codex-linux.sh"
 echo ""
-echo -e "  ${YELLOW}Note:${NC} If you haven't authenticated, run 'codex auth' first."
+echo "Desktop entry: $DESKTOP_FILE"
 echo ""

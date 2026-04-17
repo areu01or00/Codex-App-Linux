@@ -1,9 +1,6 @@
-# Codex App for Linux (Unofficial)
-
+# Codex for Linux (Unofficial)
 
 Run OpenAI's Codex desktop app on Linux by extracting and patching the macOS version.
-
-<img width="1915" height="976" alt="image" src="https://github.com/user-attachments/assets/f55dd00b-f301-436b-86ba-21b6683f361c" />
 
 ```
 ╔═══════════════════════════════════════════════════╗
@@ -13,22 +10,48 @@ Run OpenAI's Codex desktop app on Linux by extracting and patching the macOS ver
 
 ## Quick Start
 
-1. Download `Codex.dmg` from [OpenAI](https://openai.com/codex)
-2. Download `install-codex-linux.sh` from this repo
-3. Put both files in the same folder
-4. Run:
+1. Download `install-codex-linux.sh` from this repo
+2. Run:
 
 ```bash
 chmod +x install-codex-linux.sh
 ./install-codex-linux.sh
 ```
 
-5. Launch:
+The installer will automatically download the latest official Codex DMG if no local `.dmg` is found.
+
+3. Launch:
 
 ```bash
 cd codex-linux
 ./codex-linux.sh
 ```
+
+## Installer Options
+
+```bash
+./install-codex-linux.sh --dmg /path/to/Codex.dmg
+./install-codex-linux.sh --output /path/to/codex-linux
+./install-codex-linux.sh --skip-cli-install
+```
+
+## Updating to a New Codex DMG
+
+If OpenAI ships a newer macOS build, you can refresh this Linux port in place:
+
+```bash
+cd codex-linux-port
+./refresh-from-dmg.sh ../Codex.dmg
+npm install
+npx @electron/rebuild
+./codex-linux.sh
+```
+
+`refresh-from-dmg.sh` will:
+- extract the new DMG
+- replace `.vite`, `webview`, and `native` with fresh app payload
+- stub macOS-only modules
+- update local `package.json` version/electron pin from the extracted app metadata
 
 ## Requirements
 
@@ -40,12 +63,13 @@ cd codex-linux
 
 The installer:
 
-1. Extracts the DMG using 7zip
-2. Unpacks the Electron app's `app.asar` archive
-3. Installs Linux-compatible Electron runtime (v40)
-4. Rebuilds native modules (`better-sqlite3`, `node-pty`) for Linux
+1. Resolves a DMG source (local file or latest official download URL)
+2. Extracts app payload from `app.asar`
+3. Builds `package.json` from extracted app metadata (version, electron, deps)
+4. Installs/rebuilds native modules for Linux
 5. Stubs macOS-only modules (`electron-liquid-glass`, `sparkle`)
-6. Creates a launcher script
+6. Creates a launcher that prefers your current `codex` CLI in `PATH`
+7. Adds a desktop entry (`~/.local/share/applications/codex-linux.desktop`)
 
 ## How It Works
 
