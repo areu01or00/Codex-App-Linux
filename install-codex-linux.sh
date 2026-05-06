@@ -215,12 +215,19 @@ const excludedWorkspaceDeps = new Set([
 ]);
 const excludedPlatformDeps = new Set([
   "electron-liquid-glass",
+  "objc-js",
 ]);
+const excludedProtocols = [
+  "link:",
+  "workspace:",
+  "file:",
+];
 
 const deps = {};
 for (const [name, version] of Object.entries(sourceDeps)) {
   if (excludedWorkspaceDeps.has(name)) continue;
   if (excludedPlatformDeps.has(name)) continue;
+  if (excludedProtocols.some((prefix) => String(version).startsWith(prefix))) continue;
   deps[name] = version;
 }
 
