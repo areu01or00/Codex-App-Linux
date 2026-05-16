@@ -13,3 +13,6 @@ node_modules/
 # Local logs and package manager noise.
 *.log
 npm-debug.log*
+
+# Local pasted screenshots before sanitizing them into demo/.
+Pasted image.png

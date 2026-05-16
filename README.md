@@ -10,6 +10,10 @@
   <img src="https://img.shields.io/badge/project-unofficial-red" alt="Unofficial" />
 </p>
 
+<p align="center">
+  <img src="demo/codex-mobile-pairing.png" alt="Codex Mobile pairing screen running in the Linux port with the QR code scrambled for safety" width="820" />
+</p>
+
 OpenAI does not currently ship a native Codex desktop app for Linux. That matters more now because Codex Mobile expects a desktop Codex app to approve phone pairing. This project fills that gap by converting the official macOS Codex `.dmg` into a Linux-compatible Electron bundle and patching the Linux build so Codex Mobile pairing is available.
 
 Download the script, execute it, and it builds a runnable `codex-linux` app directory for you.
