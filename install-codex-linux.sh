@@ -353,32 +353,38 @@ function findAsset(pattern) {
   return path.join(assetsDir, matches[0]);
 }
 
-function replaceOnce(file, from, to, label) {
+function replaceOptional(file, from, to, label) {
   const input = fs.readFileSync(file, "utf8");
+  if (input.includes(to)) {
+    console.log(`Already patched ${label} in ${path.basename(file)}`);
+    return;
+  }
   if (!input.includes(from)) {
-    throw new Error(`Could not patch ${label}; expected snippet not found in ${path.basename(file)}`);
+    console.warn(`Skipping ${label}; expected snippet not found in ${path.basename(file)}`);
+    return;
   }
   fs.writeFileSync(file, input.replace(from, to));
+  console.log(`Patched ${label} in ${path.basename(file)}`);
 }
 
 const appMain = findAsset(/^app-main-.*\.js$/);
 const remoteConnections = findAsset(/^remote-connections-settings-.*\.js$/);
 
-replaceOnce(
+replaceOptional(
   appMain,
   "i=Pl(),a=Is(`2798711298`)",
   "i=!0,a=!0",
   "Codex Mobile announcement feature gate"
 );
 
-replaceOnce(
+replaceOptional(
   appMain,
   "remoteControlFeaturesVisible:Pl(),remoteControlOnboardingEnabled:Is(`2798711298`)",
   "remoteControlFeaturesVisible:!0,remoteControlOnboardingEnabled:!0",
   "Codex Mobile sidebar feature gate"
 );
 
-replaceOnce(
+replaceOptional(
   remoteConnections,
   "if(r)return null;if(!n){let t;",
   "if(r)return null;{let t;",
