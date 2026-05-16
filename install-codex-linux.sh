@@ -17,6 +17,7 @@ cd "$SCRIPT_DIR"
 
 DEFAULT_DMG_URL="https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
 DEFAULT_OUTPUT_DIR="$SCRIPT_DIR/codex-linux"
+INSTALLER_VERSION="2026.05.16-mobile-pairing"
 WORK_DIR="$(mktemp -d /tmp/codex-linux-install-XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -79,6 +80,8 @@ echo -e "${CYAN}╔════════════════════�
 echo -e "${CYAN}║       Codex Linux Installer (Unofficial)          ║${NC}"
 echo -e "${CYAN}║    Frictionless DMG -> Linux app conversion       ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════════════╝${NC}"
+echo ""
+echo "Installer version: $INSTALLER_VERSION"
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -209,7 +212,11 @@ const appVersion = process.argv[4];
 const sourceDeps = srcPkg.dependencies || {};
 const excludedWorkspaceDeps = new Set([
   "app-server-types",
+  "browser-api",
+  "browser-backend-common",
   "browser-common",
+  "commands",
+  "external-agent-migration",
   "protocol",
   "shared-node",
 ]);
@@ -231,10 +238,18 @@ for (const [name, version] of Object.entries(sourceDeps)) {
   deps[name] = version;
 }
 
-const electronVersion =
+let electronVersion =
   (srcPkg.devDependencies && srcPkg.devDependencies.electron) ||
   (srcPkg.dependencies && srcPkg.dependencies.electron) ||
   "40.0.0";
+
+let electronMajor = Number.parseInt(String(electronVersion).match(/\d+/)?.[0] || "0", 10);
+if (electronMajor >= 42 && deps["better-sqlite3"]) {
+  // better-sqlite3 12.x does not yet build against Electron 42's V8
+  // external pointer API. Use the newest Electron 41 runtime for Linux.
+  electronVersion = "41.6.1";
+  electronMajor = 41;
+}
 
 const output = {
   name: "codex-linux",
@@ -308,6 +323,63 @@ NODE
 
 APP_MAIN_ENTRY="$(node -e "const p=require('$OUTPUT_DIR/package.json'); console.log(p.main||'unknown')")"
 ELECTRON_RUNTIME_VERSION="$(node -e "const p=require('$OUTPUT_DIR/package.json'); console.log((p.devDependencies&&p.devDependencies.electron)||'unknown')")"
+
+# -----------------------------------------------------------------------------
+# Web UI feature gates
+# -----------------------------------------------------------------------------
+log "Patching Codex Mobile pairing gates for Linux..."
+
+node - "$OUTPUT_DIR" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const root = process.argv[2];
+const assetsDir = path.join(root, "webview", "assets");
+
+function findAsset(pattern) {
+  const matches = fs.readdirSync(assetsDir).filter((name) => pattern.test(name));
+  if (matches.length === 0) {
+    throw new Error(`Could not find asset matching ${pattern}`);
+  }
+  return path.join(assetsDir, matches[0]);
+}
+
+function replaceOnce(file, from, to, label) {
+  const input = fs.readFileSync(file, "utf8");
+  if (!input.includes(from)) {
+    throw new Error(`Could not patch ${label}; expected snippet not found in ${path.basename(file)}`);
+  }
+  fs.writeFileSync(file, input.replace(from, to));
+}
+
+const appMain = findAsset(/^app-main-.*\.js$/);
+const remoteConnections = findAsset(/^remote-connections-settings-.*\.js$/);
+
+replaceOnce(
+  appMain,
+  "i=Pl(),a=Is(`2798711298`)",
+  "i=!0,a=!0",
+  "Codex Mobile announcement feature gate"
+);
+
+replaceOnce(
+  appMain,
+  "remoteControlFeaturesVisible:Pl(),remoteControlOnboardingEnabled:Is(`2798711298`)",
+  "remoteControlFeaturesVisible:!0,remoteControlOnboardingEnabled:!0",
+  "Codex Mobile sidebar feature gate"
+);
+
+replaceOnce(
+  remoteConnections,
+  "if(r)return null;if(!n){let t;",
+  "if(r)return null;{let t;",
+  "Connections tab mobile setup visibility"
+);
+
+console.log(`Patched ${path.basename(appMain)} and ${path.basename(remoteConnections)}`);
+NODE
+
+success "Codex Mobile pairing UI enabled"
 
 # -----------------------------------------------------------------------------
 # npm install + rebuild
@@ -407,11 +479,12 @@ fi
 
 node - "$OUTPUT_DIR/build-info.json" \
   "$APP_VERSION" "$APP_BUILD" "$ELECTRON_RUNTIME_VERSION" "$APP_MAIN_ENTRY" \
-  "$DMG_PATH" "$DMG_SHA256" "$CLI_PATH_USED" "$CLI_VERSION_USED" <<'NODE'
+  "$DMG_PATH" "$DMG_SHA256" "$CLI_PATH_USED" "$CLI_VERSION_USED" "$INSTALLER_VERSION" <<'NODE'
 const fs = require("fs");
 const outPath = process.argv[2];
 const payload = {
   generatedAt: new Date().toISOString(),
+  installerVersion: process.argv[11],
   codexAppVersion: process.argv[3],
   codexAppBuild: process.argv[4],
   electronRuntime: process.argv[5],
@@ -433,11 +506,23 @@ cat > "$DESKTOP_FILE" <<DESKTOP
 [Desktop Entry]
 Name=Codex (Linux Port)
 Comment=Run Codex desktop app on Linux (unofficial)
-Exec=$OUTPUT_DIR/codex-linux.sh
+Exec=$OUTPUT_DIR/codex-linux.sh %u
 Terminal=false
 Type=Application
 Categories=Development;
+MimeType=x-scheme-handler/codex;
 DESKTOP
+
+if command -v xdg-mime >/dev/null 2>&1; then
+  xdg-mime default codex-linux.desktop x-scheme-handler/codex 2>/dev/null || \
+    warn "Could not register codex:// URL handler with xdg-mime. Auth callbacks may not return to the desktop app automatically."
+else
+  warn "xdg-mime not found. Register x-scheme-handler/codex manually if auth callbacks do not return to Codex."
+fi
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+fi
 
 # -----------------------------------------------------------------------------
 # Done
@@ -448,6 +533,7 @@ echo -e "${GREEN}║            Installation Complete!                 ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "Installed app: $OUTPUT_DIR"
+echo "Installer:     $INSTALLER_VERSION"
 echo "App version:   $APP_VERSION (build $APP_BUILD)"
 echo "Electron:      $ELECTRON_RUNTIME_VERSION"
 echo "Main entry:    $APP_MAIN_ENTRY"
@@ -455,6 +541,7 @@ echo "DMG source:    $DMG_PATH"
 echo "DMG sha256:    $DMG_SHA256"
 echo "Codex CLI:     $CLI_PATH_USED ($CLI_VERSION_USED)"
 echo "Build info:    $OUTPUT_DIR/build-info.json"
+echo "URL handler:   x-scheme-handler/codex -> $DESKTOP_FILE"
 echo ""
 echo "Launch:"
 echo "  cd \"$OUTPUT_DIR\""

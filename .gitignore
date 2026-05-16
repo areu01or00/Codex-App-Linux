@@ -1,0 +1,15 @@
+# Downloaded official Codex DMG. Keep this out of git.
+*.dmg
+
+# Generated Linux app output.
+codex-linux/
+
+# Temporary extraction/build output.
+tmp/
+dist/
+build/
+node_modules/
+
+# Local logs and package manager noise.
+*.log
+npm-debug.log*
