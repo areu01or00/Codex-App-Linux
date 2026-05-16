@@ -12,7 +12,16 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SCRIPT_DIR="$(pwd)"
+fi
+
+if [ -f "$SCRIPT_DIR/codex-linux.sh" ] && [ -d "$SCRIPT_DIR/webview" ]; then
+  SCRIPT_DIR="$(dirname "$SCRIPT_DIR")"
+fi
+
 cd "$SCRIPT_DIR"
 
 DEFAULT_DMG_URL="https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
@@ -32,10 +41,10 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log() { echo -e "${CYAN}[*]${NC} $1"; }
-success() { echo -e "${GREEN}[✓]${NC} $1"; }
-warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+log() { echo -e "${CYAN}[*]${NC} $1" >&2; }
+success() { echo -e "${GREEN}[✓]${NC} $1" >&2; }
+warn() { echo -e "${YELLOW}[!]${NC} $1" >&2; }
+error() { echo -e "${RED}[✗]${NC} $1" >&2; exit 1; }
 
 usage() {
   cat <<USAGE

@@ -44,9 +44,13 @@ The latest Codex mobile workflow also depends on desktop-side authentication and
 
 ### Option A: one command
 
+Run this from the directory where you want the generated `codex-linux/` app folder to live:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/areu01or00/Codex-App-Linux/main/install-codex-linux.sh | bash
 ```
+
+If you are already inside an existing generated `codex-linux/` folder, run `cd ..` first or re-run the installer from the parent directory.
 
 ### Option B: clone and run
 
