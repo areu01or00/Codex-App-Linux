@@ -70,6 +70,12 @@ cd codex-linux
 
 The installer also creates a desktop entry, so after the first install you can usually launch **Codex (Linux Port)** from your app menu.
 
+The launcher defaults to a Linux stable graphics mode that avoids common Electron flicker/jank on Wayland, VAAPI, and Vulkan stacks. To use Electron's native graphics path instead:
+
+```bash
+CODEX_LINUX_GRAPHICS_MODE=native ./codex-linux.sh
+```
+
 ## Installer flags
 
 ```bash
@@ -137,6 +143,7 @@ Attach this file in issues. It makes compatibility debugging much faster.
 | `codex-app-server-version-unsupported` | Update CLI: `npm i -g @openai/codex@latest`; launcher should use `which codex` |
 | CLI not found | Install CLI globally or let launcher use built-in `npx` fallback |
 | Blank/failed window | Ensure `.vite` and `webview` exist under install output directory |
+| Flickering, white panels, or janky settings UI | Use the default launcher. It applies stable Linux graphics flags. To opt out, run `CODEX_LINUX_GRAPHICS_MODE=native ./codex-linux.sh` |
 | Phone/browser auth does not return to Codex | Re-run installer, then verify `xdg-mime query default x-scheme-handler/codex` returns `codex-linux.desktop` |
 
 ## Authentication callbacks

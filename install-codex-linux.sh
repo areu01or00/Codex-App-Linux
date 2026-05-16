@@ -460,7 +460,17 @@ if [ -z "${CODEX_CLI_PATH:-}" ]; then
   fi
 fi
 
-exec ./node_modules/.bin/electron . --no-sandbox "$@"
+linux_graphics_flags=()
+if [ "${CODEX_LINUX_GRAPHICS_MODE:-stable}" != "native" ]; then
+  linux_graphics_flags+=(
+    --ozone-platform=x11
+    --disable-features=VaapiVideoDecoder,VaapiVideoEncoder,Vulkan,UseSkiaRenderer
+    --disable-smooth-scrolling
+    --disable-backgrounding-occluded-windows
+  )
+fi
+
+exec ./node_modules/.bin/electron . --no-sandbox "${linux_graphics_flags[@]}" "$@"
 LAUNCHER
 chmod +x "$OUTPUT_DIR/codex-linux.sh"
 
