@@ -100,7 +100,60 @@ log "Checking prerequisites..."
 
 command -v node >/dev/null 2>&1 || error "Node.js is required (v18+ recommended)."
 command -v npm >/dev/null 2>&1 || error "npm is required."
-command -v curl >/dev/null 2>&1 || error "curl is required."
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || error "curl or wget is required."
+
+# Detect snap-confined curl. Snap curl on Ubuntu remaps /tmp to its private
+# namespace and still exits 0 on success, so a download to /tmp silently
+# produces no file on the host. Real curl path contains no "/snap/" segment.
+CURL_IS_SNAP=0
+if command -v curl >/dev/null 2>&1; then
+  curl_path="$(command -v curl)"
+  curl_resolved="$(readlink -f "$curl_path" 2>/dev/null || true)"
+  case "$curl_path:$curl_resolved" in
+    */snap/*|/snap/*|*:*/snap|*:/usr/bin/snap) CURL_IS_SNAP=1 ;;
+  esac
+fi
+
+# Helper: download a URL to a file. Tries native curl, then wget, then
+# snap-curl with a $HOME staging workaround (snap curl can write inside
+# $HOME but not /tmp). Every attempt verifies the file actually exists
+# and is non-empty before declaring success — exit codes alone aren't
+# trustworthy when a sandbox is in the loop.
+download_file() {
+  local url="$1" output="$2"
+  rm -f "$output"
+
+  if command -v curl >/dev/null 2>&1 && [ "$CURL_IS_SNAP" = "0" ]; then
+    curl -fsSL --retry 3 --connect-timeout 20 "$url" -o "$output" 2>/dev/null || true
+    [ -s "$output" ] && return 0
+    rm -f "$output"
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q "$url" -O "$output" || true
+    [ -s "$output" ] && return 0
+    rm -f "$output"
+  fi
+
+  if command -v curl >/dev/null 2>&1 && [ "$CURL_IS_SNAP" = "1" ]; then
+    local stage_dir="$HOME/.cache/codex-installer"
+    mkdir -p "$stage_dir"
+    local stage_file
+    stage_file="$stage_dir/dl-$$-$(date +%s%N 2>/dev/null || echo rand).bin"
+    rm -f "$stage_file"
+    curl -fsSL --retry 3 --connect-timeout 20 "$url" -o "$stage_file" 2>/dev/null || true
+    if [ -s "$stage_file" ]; then
+      mv -f "$stage_file" "$output" && [ -s "$output" ] && return 0
+    fi
+    rm -f "$stage_file" "$output"
+  fi
+
+  return 1
+}
+
+if [ "$CURL_IS_SNAP" = "1" ] && ! command -v wget >/dev/null 2>&1; then
+  warn "Detected snap-confined curl and no wget. Downloads will be staged via \$HOME — install 'wget' or a non-snap curl ('sudo apt install wget') for the fast path."
+fi
 
 success "Node.js: $(node --version)"
 success "npm: $(npm --version)"
@@ -130,7 +183,7 @@ resolve_dmg_path() {
 
   local downloaded="$SCRIPT_DIR/Codex-latest.dmg"
   log "No local DMG found. Downloading latest Codex DMG..."
-  curl -fL --retry 3 --connect-timeout 20 -o "$downloaded" "$DEFAULT_DMG_URL" || error "Failed to download DMG from $DEFAULT_DMG_URL"
+  download_file "$DEFAULT_DMG_URL" "$downloaded" || error "Failed to download DMG from $DEFAULT_DMG_URL"
   echo "$downloaded"
 }
 
@@ -159,7 +212,7 @@ find_7zip() {
   fi
 
   log "7z not found. Downloading portable 7zip..."
-  curl -fsSL https://www.7-zip.org/a/7z2408-linux-x64.tar.xz -o /tmp/7z.tar.xz || error "Failed to download 7zip"
+  download_file "https://www.7-zip.org/a/7z2601-linux-x64.tar.xz" /tmp/7z.tar.xz || error "Failed to download 7zip"
   tar -xf /tmp/7z.tar.xz -C /tmp/ || error "Failed to extract 7zip"
   [ -x /tmp/7zz ] || error "7zip binary not found after extraction"
   echo "/tmp/7zz"
