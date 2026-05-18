@@ -153,16 +153,20 @@ find_7zip() {
     echo "7zz"
     return
   fi
-  if [ -x /tmp/7zz ]; then
-    echo "/tmp/7zz"
-    return
-  fi
 
-  log "7z not found. Downloading portable 7zip..."
-  curl -fsSL https://www.7-zip.org/a/7z2408-linux-x64.tar.xz -o /tmp/7z.tar.xz || error "Failed to download 7zip"
-  tar -xf /tmp/7z.tar.xz -C /tmp/ || error "Failed to extract 7zip"
-  [ -x /tmp/7zz ] || error "7zip binary not found after extraction"
-  echo "/tmp/7zz"
+  cat >&2 <<'EOF'
+
+7zip is required to extract the Codex DMG.
+
+Install it, then rerun the installer:
+
+  Ubuntu/Debian: sudo apt install p7zip-full
+  Fedora:        sudo dnf install p7zip p7zip-plugins
+  Arch:          sudo pacman -S p7zip
+  openSUSE:      sudo zypper install p7zip
+
+EOF
+  error "7zip not found"
 }
 
 SEVEN_ZIP="$(find_7zip)"

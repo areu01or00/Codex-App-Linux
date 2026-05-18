@@ -133,7 +133,24 @@ Attach this file in issues. It makes compatibility debugging much faster.
 - Linux (tested on Ubuntu 22.04+)
 - Node.js + npm
 - `curl`
+- `7z` or `7zz` for DMG extraction
 - ~500MB free disk
+
+Install 7zip before running the installer:
+
+```bash
+# Ubuntu/Debian
+sudo apt install p7zip-full
+
+# Fedora
+sudo dnf install p7zip p7zip-plugins
+
+# Arch
+sudo pacman -S p7zip
+
+# openSUSE
+sudo zypper install p7zip
+```
 
 ## Troubleshooting
 
@@ -142,6 +159,7 @@ Attach this file in issues. It makes compatibility debugging much faster.
 | `Cannot find module ...` on startup | Re-run installer so dependencies are regenerated for that DMG build |
 | `codex-app-server-version-unsupported` | Update CLI: `npm i -g @openai/codex@latest`; launcher should use `which codex` |
 | CLI not found | Install CLI globally or let launcher use built-in `npx` fallback |
+| `7zip not found` | Install `p7zip-full`, `p7zip`, or your distro's 7zip package, then rerun the installer |
 | Blank/failed window | Ensure `.vite` and `webview` exist under install output directory |
 | Flickering, white panels, or janky settings UI | Use the default launcher. It applies stable Linux graphics flags. To opt out, run `CODEX_LINUX_GRAPHICS_MODE=native ./codex-linux.sh` |
 | Phone/browser auth does not return to Codex | Re-run installer, then verify `xdg-mime query default x-scheme-handler/codex` returns `codex-linux.desktop` |
